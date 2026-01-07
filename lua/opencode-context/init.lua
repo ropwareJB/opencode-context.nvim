@@ -263,8 +263,9 @@ local function send_to_opencode(message)
 	end
 
 	-- Send message directly to the pane
-	local cmd = string.format("tmux send-keys -t %s %s Enter", pane, vim.fn.shellescape(message))
+	local cmd = string.format("tmux send-keys -t %s %s", pane, vim.fn.shellescape(message))
 	vim.fn.system(cmd)
+	vim.fn.system(string.format("tmux send-keys -t %s C-m", pane))
 
 	if vim.v.shell_error == 0 then
 		vim.notify(string.format("Sent prompt to opencode pane (%s)", pane), vim.log.levels.INFO)
