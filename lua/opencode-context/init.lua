@@ -39,6 +39,24 @@ local function run_system_command(cmd)
 	return output
 end
 
+local function zellij_supports_send_keys()
+	if M._zellij_supports_send_keys ~= nil then
+		return M._zellij_supports_send_keys
+	end
+
+	M._zellij_supports_send_keys = run_system_command("zellij action send-keys --help 2>/dev/null") ~= nil
+	return M._zellij_supports_send_keys
+end
+
+local function zellij_supports_tab_info()
+	if M._zellij_supports_tab_info ~= nil then
+		return M._zellij_supports_tab_info
+	end
+
+	M._zellij_supports_tab_info = run_system_command("zellij action current-tab-info --help 2>/dev/null") ~= nil
+	return M._zellij_supports_tab_info
+end
+
 local function get_current_file_path()
 	local bufnr = vim.api.nvim_get_current_buf()
 	local filename = vim.api.nvim_buf_get_name(bufnr)
@@ -309,6 +327,10 @@ local function find_opencode_zellij_pane()
 		return nil
 	end
 
+	if not zellij_supports_tab_info() then
+		return vim.env.ZELLIJ_PANE_ID
+	end
+
 	local current_tab_info = run_system_command("zellij action current-tab-info --json 2>/dev/null")
 	if not current_tab_info then
 		return nil
@@ -412,15 +434,23 @@ local function send_to_opencode(message)
 			success = true
 		end
 	else
-		local write_cmd = string.format(
-			"zellij action write-chars --pane-id %s %s",
-			vim.fn.shellescape(target),
-			vim.fn.shellescape(message)
-		)
-		local enter_cmd = string.format(
-			"zellij action send-keys --pane-id %s Enter",
-			vim.fn.shellescape(target)
-		)
+		local write_cmd
+		local enter_cmd
+
+		if zellij_supports_send_keys() then
+			write_cmd = string.format(
+				"zellij action write-chars --pane-id %s %s",
+				vim.fn.shellescape(target),
+				vim.fn.shellescape(message)
+			)
+			enter_cmd = string.format(
+				"zellij action send-keys --pane-id %s Enter",
+				vim.fn.shellescape(target)
+			)
+		else
+			write_cmd = string.format("zellij action write-chars %s", vim.fn.shellescape(message))
+			enter_cmd = "zellij action write 13"
+		end
 
 		if run_system_command(write_cmd) and run_system_command(enter_cmd) then
 			success = true
@@ -467,7 +497,11 @@ function M.toggle_mode()
 	if multiplexer == "tmux" then
 		cmd = string.format("tmux send-keys -t %s Tab", vim.fn.shellescape(target))
 	else
-		cmd = string.format("zellij action send-keys --pane-id %s Tab", vim.fn.shellescape(target))
+		if zellij_supports_send_keys() then
+			cmd = string.format("zellij action send-keys --pane-id %s Tab", vim.fn.shellescape(target))
+		else
+			cmd = "zellij action write 9"
+		end
 	end
 
 	if run_system_command(cmd) then
@@ -501,6 +535,8 @@ end
 
 function M.setup(opts)
 	M.config = vim.tbl_deep_extend("force", M.config, opts or {})
+	M._zellij_supports_send_keys = nil
+	M._zellij_supports_tab_info = nil
 end
 
 return M
