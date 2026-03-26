@@ -353,9 +353,8 @@ local function find_opencode_zellij_pane()
 
 	for _, pane in ipairs(panes) do
 		if pane.is_plugin == false and pane.tab_id == current_tab.tab_id then
-			local command = (pane.pane_command or ""):lower()
 			local title = (pane.title or ""):lower()
-			if command:find("opencode", 1, true) or title:find("opencode", 1, true) then
+			if title == "opencode" then
 				return string.format("terminal_%d", pane.id)
 			end
 		end
