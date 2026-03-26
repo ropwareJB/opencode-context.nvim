@@ -354,29 +354,47 @@ local function find_opencode_target(multiplexer)
 	return nil
 end
 
-local function send_to_opencode(message)
-	local multiplexer = get_active_multiplexer()
-	if not multiplexer then
+local function notify_missing_multiplexer()
+	vim.notify(
+		"No supported terminal multiplexer detected. Start Neovim in tmux or zellij, or configure multiplexer/target explicitly.",
+		vim.log.levels.ERROR
+	)
+end
+
+local function notify_missing_target(multiplexer)
+	if multiplexer == "tmux" then
 		vim.notify(
-			"No supported terminal multiplexer detected. Start Neovim in tmux or zellij, or configure multiplexer/target explicitly.",
+			"No opencode pane found in current tmux window. Make sure opencode is running in this tmux window.",
 			vim.log.levels.ERROR
 		)
-		return false
+		return
+	end
+
+	vim.notify(
+		"No opencode pane found in current zellij tab. Make sure opencode is running in this zellij tab.",
+		vim.log.levels.ERROR
+	)
+end
+
+local function resolve_opencode_target()
+	local multiplexer = get_active_multiplexer()
+	if not multiplexer then
+		notify_missing_multiplexer()
+		return nil, nil
 	end
 
 	local target = find_opencode_target(multiplexer)
 	if not target then
-		if multiplexer == "tmux" then
-			vim.notify(
-				"No opencode pane found in current tmux window. Make sure opencode is running in this tmux window.",
-				vim.log.levels.ERROR
-			)
-		else
-			vim.notify(
-				"No opencode pane found in current zellij tab. Make sure opencode is running in this zellij tab.",
-				vim.log.levels.ERROR
-			)
-		end
+		notify_missing_target(multiplexer)
+		return multiplexer, nil
+	end
+
+	return multiplexer, target
+end
+
+local function send_to_opencode(message)
+	local multiplexer, target = resolve_opencode_target()
+	if not multiplexer or not target then
 		return false
 	end
 
@@ -440,28 +458,8 @@ function M.send_prompt()
 end
 
 function M.toggle_mode()
-	local multiplexer = get_active_multiplexer()
-	if not multiplexer then
-		vim.notify(
-			"No supported terminal multiplexer detected. Start Neovim in tmux or zellij, or configure multiplexer/target explicitly.",
-			vim.log.levels.ERROR
-		)
-		return false
-	end
-
-	local target = find_opencode_target(multiplexer)
-	if not target then
-		if multiplexer == "tmux" then
-			vim.notify(
-				"No opencode pane found in current tmux window. Make sure opencode is running in this tmux window.",
-				vim.log.levels.ERROR
-			)
-		else
-			vim.notify(
-				"No opencode pane found in current zellij tab. Make sure opencode is running in this zellij tab.",
-				vim.log.levels.ERROR
-			)
-		end
+	local multiplexer, target = resolve_opencode_target()
+	if not multiplexer or not target then
 		return false
 	end
 
