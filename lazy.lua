@@ -2,9 +2,15 @@ return {
   "opencode-context.nvim",
   dev = true,
   opts = {
+    -- Multiplexer settings
+    multiplexer = "auto", -- "auto", "tmux", or "zellij"
+
     -- Tmux settings
     tmux_target = nil,  -- Manual override: "session:window.pane"
     auto_detect_pane = true,  -- Auto-detect opencode pane in current window
+
+    -- Zellij settings
+    zellij_target = nil, -- Manual override: "terminal_3"
   },
   keys = {
     { "<leader>oc", "<cmd>OpencodeSend<cr>", desc = "Send prompt to opencode" },

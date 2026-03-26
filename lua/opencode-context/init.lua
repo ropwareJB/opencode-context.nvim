@@ -2,10 +2,42 @@ local M = {}
 local ui = require("opencode-context.ui")
 
 M.config = {
+	-- Multiplexer settings
+	multiplexer = "auto", -- "auto", "tmux", or "zellij"
+
 	-- Tmux settings
 	tmux_target = nil, -- Manual override: "session:window.pane"
 	auto_detect_pane = true, -- Auto-detect opencode pane in current window
+
+	-- Zellij settings
+	zellij_target = nil, -- Manual override: "terminal_3"
 }
+
+local function trim(value)
+	return (value or ""):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function decode_json(value)
+	if not value or value == "" then
+		return nil
+	end
+
+	local ok, decoded = pcall(vim.fn.json_decode, value)
+	if not ok then
+		return nil
+	end
+
+	return decoded
+end
+
+local function run_system_command(cmd)
+	local output = vim.fn.system(cmd)
+	if vim.v.shell_error ~= 0 then
+		return nil
+	end
+
+	return output
+end
 
 local function get_current_file_path()
 	local bufnr = vim.api.nvim_get_current_buf()
@@ -184,8 +216,31 @@ local function replace_placeholders(prompt)
 	return prompt
 end
 
-local function find_opencode_pane()
-	-- If manual target is set, use it
+local function get_active_multiplexer()
+	if M.config.multiplexer == "tmux" or M.config.multiplexer == "zellij" then
+		return M.config.multiplexer
+	end
+
+	if M.config.tmux_target then
+		return "tmux"
+	end
+
+	if M.config.zellij_target then
+		return "zellij"
+	end
+
+	if vim.env.TMUX and vim.env.TMUX ~= "" then
+		return "tmux"
+	end
+
+	if vim.env.ZELLIJ and vim.env.ZELLIJ ~= "" then
+		return "zellij"
+	end
+
+	return nil
+end
+
+local function find_opencode_tmux_pane()
 	if M.config.tmux_target then
 		return M.config.tmux_target
 	end
@@ -194,7 +249,6 @@ local function find_opencode_pane()
 		return nil
 	end
 
-	-- Get current session and window
 	local current_session_cmd = "tmux display-message -p '#{session_name}'"
 	local current_window_cmd = "tmux display-message -p '#{window_index}'"
 
@@ -205,32 +259,26 @@ local function find_opencode_pane()
 		return nil
 	end
 
-	local current_session = session_handle:read("*a"):gsub("\n", "")
-	local current_window = window_handle:read("*a"):gsub("\n", "")
+	local current_session = trim(session_handle:read("*a"))
+	local current_window = trim(window_handle:read("*a"))
 	session_handle:close()
 	window_handle:close()
 
-	if not current_session or current_session == "" or not current_window or current_window == "" then
+	if current_session == "" or current_window == "" then
 		return nil
 	end
 
-	-- Search for opencode pane in current window only
 	local strategies = {
-		-- Current command is opencode in current window
 		string.format(
 			"tmux list-panes -t %s:%s -F '#{session_name}:#{window_index}.#{pane_index}' -f '#{==:#{pane_current_command},opencode}'",
 			current_session,
 			current_window
 		),
-
-		-- Pane title contains opencode in current window
 		string.format(
 			"tmux list-panes -t %s:%s -F '#{session_name}:#{window_index}.#{pane_index}' -f '#{m:*opencode*,#{pane_title}}'",
 			current_session,
 			current_window
 		),
-
-		-- Recent command history contains opencode in current window
 		string.format(
 			"tmux list-panes -t %s:%s -F '#{session_name}:#{window_index}.#{pane_index} #{pane_start_command}' | grep opencode | head -1 | cut -d' ' -f1",
 			current_session,
@@ -241,9 +289,9 @@ local function find_opencode_pane()
 	for _, cmd in ipairs(strategies) do
 		local handle = io.popen(cmd .. " 2>/dev/null")
 		if handle then
-			local result = handle:read("*a"):gsub("\n", "")
+			local result = trim(handle:read("*a"))
 			handle:close()
-			if result and result ~= "" then
+			if result ~= "" then
 				return result
 			end
 		end
@@ -252,28 +300,122 @@ local function find_opencode_pane()
 	return nil
 end
 
+local function find_opencode_zellij_pane()
+	if M.config.zellij_target then
+		return M.config.zellij_target
+	end
+
+	if not M.config.auto_detect_pane then
+		return nil
+	end
+
+	local current_tab_info = run_system_command("zellij action current-tab-info --json 2>/dev/null")
+	if not current_tab_info then
+		return nil
+	end
+
+	local current_tab = decode_json(current_tab_info)
+	if not current_tab or current_tab.tab_id == nil then
+		return nil
+	end
+
+	local panes_info = run_system_command("zellij action list-panes --json 2>/dev/null")
+	if not panes_info then
+		return nil
+	end
+
+	local panes = decode_json(panes_info)
+	if type(panes) ~= "table" then
+		return nil
+	end
+
+	for _, pane in ipairs(panes) do
+		if pane.is_plugin == false and pane.tab_id == current_tab.tab_id then
+			local command = (pane.pane_command or ""):lower()
+			local title = (pane.title or ""):lower()
+			if command:find("opencode", 1, true) or title:find("opencode", 1, true) then
+				return string.format("terminal_%d", pane.id)
+			end
+		end
+	end
+
+	return nil
+end
+
+local function find_opencode_target(multiplexer)
+	if multiplexer == "tmux" then
+		return find_opencode_tmux_pane()
+	end
+
+	if multiplexer == "zellij" then
+		return find_opencode_zellij_pane()
+	end
+
+	return nil
+end
+
 local function send_to_opencode(message)
-	local pane = find_opencode_pane()
-	if not pane then
+	local multiplexer = get_active_multiplexer()
+	if not multiplexer then
 		vim.notify(
-			"No opencode pane found in current window. Make sure opencode is running in a pane in this tmux window.",
+			"No supported terminal multiplexer detected. Start Neovim in tmux or zellij, or configure multiplexer/target explicitly.",
 			vim.log.levels.ERROR
 		)
 		return false
 	end
 
-	-- Send message directly to the pane
-	local cmd = string.format("tmux send-keys -t %s %s", pane, vim.fn.shellescape(message))
-	vim.fn.system(cmd)
-	vim.fn.system(string.format("tmux send-keys -t %s C-m", pane))
-
-	if vim.v.shell_error == 0 then
-		vim.notify(string.format("Sent prompt to opencode pane (%s)", pane), vim.log.levels.INFO)
-		return true
-	else
-		vim.notify("Failed to send to opencode pane", vim.log.levels.ERROR)
+	local target = find_opencode_target(multiplexer)
+	if not target then
+		if multiplexer == "tmux" then
+			vim.notify(
+				"No opencode pane found in current tmux window. Make sure opencode is running in this tmux window.",
+				vim.log.levels.ERROR
+			)
+		else
+			vim.notify(
+				"No opencode pane found in current zellij tab. Make sure opencode is running in this zellij tab.",
+				vim.log.levels.ERROR
+			)
+		end
 		return false
 	end
+
+	local success = false
+
+	if multiplexer == "tmux" then
+		local write_cmd = string.format(
+			"tmux send-keys -t %s %s",
+			vim.fn.shellescape(target),
+			vim.fn.shellescape(message)
+		)
+		local enter_cmd = string.format("tmux send-keys -t %s C-m", vim.fn.shellescape(target))
+
+		if run_system_command(write_cmd) and run_system_command(enter_cmd) then
+			success = true
+		end
+	else
+		local write_cmd = string.format(
+			"zellij action write-chars --pane-id %s %s",
+			vim.fn.shellescape(target),
+			vim.fn.shellescape(message)
+		)
+		local enter_cmd = string.format(
+			"zellij action send-keys --pane-id %s Enter",
+			vim.fn.shellescape(target)
+		)
+
+		if run_system_command(write_cmd) and run_system_command(enter_cmd) then
+			success = true
+		end
+	end
+
+	if success then
+		vim.notify(string.format("Sent prompt to opencode pane (%s via %s)", target, multiplexer), vim.log.levels.INFO)
+		return true
+	end
+
+	vim.notify(string.format("Failed to send prompt via %s", multiplexer), vim.log.levels.ERROR)
+	return false
 end
 
 function M.send_prompt()
@@ -298,26 +440,45 @@ function M.send_prompt()
 end
 
 function M.toggle_mode()
-	local pane = find_opencode_pane()
-	if not pane then
+	local multiplexer = get_active_multiplexer()
+	if not multiplexer then
 		vim.notify(
-			"No opencode pane found in current window. Make sure opencode is running in a pane in this tmux window.",
+			"No supported terminal multiplexer detected. Start Neovim in tmux or zellij, or configure multiplexer/target explicitly.",
 			vim.log.levels.ERROR
 		)
 		return false
 	end
 
-	-- Send tab key to toggle between planning/build mode
-	local cmd = string.format("tmux send-keys -t %s Tab", pane)
-	vim.fn.system(cmd)
-
-	if vim.v.shell_error == 0 then
-		vim.notify(string.format("Toggled opencode mode (%s)", pane), vim.log.levels.INFO)
-		return true
-	else
-		vim.notify("Failed to toggle opencode mode", vim.log.levels.ERROR)
+	local target = find_opencode_target(multiplexer)
+	if not target then
+		if multiplexer == "tmux" then
+			vim.notify(
+				"No opencode pane found in current tmux window. Make sure opencode is running in this tmux window.",
+				vim.log.levels.ERROR
+			)
+		else
+			vim.notify(
+				"No opencode pane found in current zellij tab. Make sure opencode is running in this zellij tab.",
+				vim.log.levels.ERROR
+			)
+		end
 		return false
 	end
+
+	local cmd
+	if multiplexer == "tmux" then
+		cmd = string.format("tmux send-keys -t %s Tab", vim.fn.shellescape(target))
+	else
+		cmd = string.format("zellij action send-keys --pane-id %s Tab", vim.fn.shellescape(target))
+	end
+
+	if run_system_command(cmd) then
+		vim.notify(string.format("Toggled opencode mode (%s via %s)", target, multiplexer), vim.log.levels.INFO)
+		return true
+	end
+
+	vim.notify(string.format("Failed to toggle opencode mode via %s", multiplexer), vim.log.levels.ERROR)
+	return false
 end
 
 -- Create a callback that processes placeholders and sends to opencode
