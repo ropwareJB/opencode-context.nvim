@@ -351,10 +351,23 @@ local function find_opencode_zellij_pane()
 		return nil
 	end
 
+  -- First look for an exact pane titled opencode
 	for _, pane in ipairs(panes) do
 		if pane.is_plugin == false and pane.tab_id == current_tab.tab_id then
 			local title = (pane.title or ""):lower()
-			if title == "opencode" then
+			local command = (pane["pane-command"] or ""):lower()
+			if title == "opencode" or command == "opencode" then
+				return string.format("terminal_%d", pane.id)
+			end
+		end
+	end
+
+  -- then do a substring match
+	for _, pane in ipairs(panes) do
+		if pane.is_plugin == false and pane.tab_id == current_tab.tab_id then
+			local title = (pane.title or ""):lower()
+			local command = (pane["pane-command"] or ""):lower()
+			if string.find(command, "opencode") > 0 or string.find(title, "opencode") > 0 then
 				return string.format("terminal_%d", pane.id)
 			end
 		end
