@@ -478,11 +478,12 @@ local function send_to_opencode(message)
 	return false
 end
 
-function M.send_prompt()
-	-- Check if we're in visual mode and pre-populate with @selection
+function M.send_prompt(use_selection_default)
+	-- Visual mappings can exit to Normal mode before opening the prompt,
+	-- so allow callers to explicitly preserve the @selection default.
 	local mode = vim.fn.mode()
 	local default_text = ""
-	if mode == "v" or mode == "V" or mode == "\22" then -- \22 is visual block mode
+	if use_selection_default or mode == "v" or mode == "V" or mode == "\22" then -- \22 is visual block mode
 		default_text = "@selection "
 	end
 

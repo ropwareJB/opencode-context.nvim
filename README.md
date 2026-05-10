@@ -35,7 +35,15 @@ A Neovim plugin that enables seamless context sharing with running opencode sess
   },
   keys = {
     { "<leader>oc", "<cmd>OpencodeSend<cr>", desc = "Send prompt to opencode" },
-    { "<leader>oc", "<cmd>OpencodeSend<cr>", mode = "v", desc = "Send prompt to opencode" },
+    {
+      "<leader>oc",
+      function()
+        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "x", false)
+        require("opencode-context").send_prompt(true)
+      end,
+      mode = "v",
+      desc = "Send prompt to opencode",
+    },
     { "<leader>ot", "<cmd>OpencodeSwitchMode<cr>", desc = "Toggle opencode mode" },
     { "<leader>op", "<cmd>OpencodePrompt<cr>", desc = "Open opencode persistent prompt" },
   },
@@ -75,7 +83,10 @@ require('opencode-context').setup({
 
 -- Keymaps
 vim.keymap.set("n", "<leader>oc", "<cmd>OpencodeSend<cr>", { desc = "Send prompt to opencode" })
-vim.keymap.set("v", "<leader>oc", "<cmd>OpencodeSend<cr>", { desc = "Send prompt to opencode" })
+vim.keymap.set("v", "<leader>oc", function()
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "x", false)
+  require("opencode-context").send_prompt(true)
+end, { desc = "Send prompt to opencode" })
 vim.keymap.set("n", "<leader>ot", "<cmd>OpencodeSwitchMode<cr>", { desc = "Toggle opencode mode" })
 vim.keymap.set("n", "<leader>op", "<cmd>OpencodePrompt<cr>", { desc = "Open opencode persistent prompt" })
 EOF

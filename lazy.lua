@@ -14,7 +14,15 @@ return {
   },
   keys = {
     { "<leader>oc", "<cmd>OpencodeSend<cr>", desc = "Send prompt to opencode" },
-    { "<leader>oc", "<cmd>OpencodeSend<cr>", mode = "v", desc = "Send prompt to opencode" },
+    {
+      "<leader>oc",
+      function()
+        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "x", false)
+        require("opencode-context").send_prompt(true)
+      end,
+      mode = "v",
+      desc = "Send prompt to opencode",
+    },
     { "<leader>om", "<cmd>OpencodeSwitchMode<cr>", desc = "Toggle opencode mode" },
   },
   cmd = {
